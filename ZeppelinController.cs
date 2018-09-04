@@ -252,7 +252,7 @@ namespace ZepController
                     }
                     else
                     {
-                        (block.GameLogic as ZeppelinController).ToggleActive();
+                        ToggleActive();
                     }
                 };
                 OnOff.Title = MyStringId.GetOrCompute("Zeppelin Controller On/Off");
@@ -265,7 +265,7 @@ namespace ZepController
                 Slider.Enabled = (block) => { return block.EntityId == ModBlock.EntityId; };
                 Slider.Setter = (block, value) =>
                 {
-                    (block.GameLogic as ZeppelinController).Data.TargetAltitude = value;
+                    Data.TargetAltitude = value;
                     if (!MyAPIGateway.Multiplayer.IsServer)
                     {
                         Core.SendDataChanged(Data);
@@ -285,13 +285,13 @@ namespace ZepController
                 Button.Tooltip = MyStringId.GetOrCompute("Use to update controller blocks & config");
                 Button.Action = (b) =>
                 {
-                    if (ShouldRunUpdates())
+                    if (!MyAPIGateway.Multiplayer.IsServer)
                     {
-                        (b.GameLogic as ZeppelinController).ZeppSetup();
+                        Core.SendRequest(new Coms.Command() { Arguments = "run", DataType = b.EntityId.ToString() });
                     }
                     else
                     {
-                        Core.SendRequest(new Coms.Command() { Arguments = "run", DataType = b.EntityId.ToString() });
+                        ZeppSetup();
                     }
                 };
                 MyAPIGateway.TerminalControls.AddControl<IMyCockpit>(Button);
@@ -311,7 +311,7 @@ namespace ZepController
                     }
                     else
                     {
-                        (b.GameLogic as ZeppelinController).ChangeTargetElevation(UP_1);
+                        ChangeTargetElevation(UP_1);
                     }
                 };
 
@@ -331,7 +331,7 @@ namespace ZepController
                     }
                     else
                     {
-                        (b.GameLogic as ZeppelinController).ChangeTargetElevation(DOWN_1);
+                        ChangeTargetElevation(DOWN_1);
                     }
                 };
 
@@ -351,7 +351,7 @@ namespace ZepController
                     }
                     else
                     {
-                        (b.GameLogic as ZeppelinController).ChangeTargetElevation(UP_10);
+                        ChangeTargetElevation(UP_10);
                     }
                 };
 
@@ -371,7 +371,7 @@ namespace ZepController
                     }
                     else
                     {
-                        (b.GameLogic as ZeppelinController).ChangeTargetElevation(DOWN_10);
+                        ChangeTargetElevation(DOWN_10);
                     }
                 };
 
@@ -390,7 +390,7 @@ namespace ZepController
                     }
                     else
                     {
-                        (b.GameLogic as ZeppelinController).ChangeTargetElevation(UP_100);
+                        ChangeTargetElevation(UP_100);
                     }
                 };
 
@@ -410,7 +410,7 @@ namespace ZepController
                     }
                     else
                     {
-                        (b.GameLogic as ZeppelinController).ChangeTargetElevation(DOWN_100);
+                        ChangeTargetElevation(DOWN_100);
                     }
                 };
 
