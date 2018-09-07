@@ -79,9 +79,8 @@ namespace ZepController
 
         private void HandleFromClient(Command cmd)
         {
-            if (cmd.Arguments == "run")
+            if (cmd.Arguments == "setup")
             {
-                //MyLog.Default.Info($"Running {cmd.DataType}");
                 long blockId = long.Parse(cmd.DataType);
 
                 if (Zeppelins.ContainsKey(blockId))
@@ -99,7 +98,6 @@ namespace ZepController
             }
             else if (cmd.Arguments == "change")
             {
-                //MyLog.Default.Info($"Change {cmd.DataType}   {cmd.XMLData}");
                 long blockId = long.Parse(cmd.DataType);
                 float amount = float.Parse(cmd.XMLData);
 
@@ -110,7 +108,6 @@ namespace ZepController
             }
             else if (cmd.Arguments == "toggle_active")
             {
-                //MyLog.Default.Info($"Toggle {cmd.DataType}");
                 long blockId = long.Parse(cmd.DataType);
                 if (Zeppelins.ContainsKey(blockId))
                 {
@@ -121,7 +118,6 @@ namespace ZepController
             {
                 ZeppelinData data = MyAPIGateway.Utilities.SerializeFromXML<ZeppelinData>(cmd.XMLData);
 
-                //MyLog.Default.Info($"UPDATE! {cmd.XMLData}");
                 if (data != null && Zeppelins.ContainsKey(data.BlockId))
                 {
                     Zeppelins[data.BlockId].Data = data;
@@ -137,7 +133,7 @@ namespace ZepController
 
             if (data != null && Zeppelins.ContainsKey(data.BlockId))
             {
-                Zeppelins[data.BlockId].Data = data;
+                Zeppelins[data.BlockId].ServerUpdate(data);
             }
         }
     }
