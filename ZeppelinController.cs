@@ -11,6 +11,7 @@ using VRage.ModAPI;
 using VRage.ObjectBuilders;
 using VRage.Utils;
 using VRageMath;
+using System.Text;
 
 namespace ZepController
 {
@@ -35,6 +36,7 @@ namespace ZepController
         private IMyTerminalAction Drop100Action = null;
         private IMyTerminalAction SetCurrentAction = null;
         private IMyTerminalAction ZeppelinOnOfAction = null;
+        private IMyTerminalAction SetupAction = null;
 
 
         public ZeppelinData Data { get; set; } = null;
@@ -185,10 +187,9 @@ namespace ZepController
                     if (textPanel.GetPublicTitle().Contains(LCDname))
                         lcd = textPanel;
                 }
-                else if (block is IMyCockpit)
+                else if (block is IMyCockpit && !block.BlockDefinition.IsNull() && block.BlockDefinition.SubtypeId == "CockpitOpen")
                 {
-                    IMyCockpit cock = block as IMyCockpit;
-                    otherCockpits.Add(cock);
+                    otherCockpits.Add(block as IMyCockpit);
                 }
             }
 
@@ -491,9 +492,31 @@ namespace ZepController
                         ((ZeppelinController)b.GameLogic).ToggleActive();
                     }
                 };
-                ZeppelinOnOfAction.Name = new System.Text.StringBuilder("Zeppelin Controller On/Off");
+                ZeppelinOnOfAction.Name = new StringBuilder("Zeppelin Controller On/Off");
                 ZeppelinOnOfAction.Writer = ActiveHotbarText;
                 MyAPIGateway.TerminalControls.AddAction<Sandbox.ModAPI.Ingame.IMyCockpit>(ZeppelinOnOfAction);
+
+                #endregion
+
+                #region Action Setup Zeppelin Controller
+
+                SetupAction = MyAPIGateway.TerminalControls.CreateAction<Sandbox.ModAPI.Ingame.IMyCockpit>("SetupZeppelinController");
+                SetupAction.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                SetupAction.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "setup", DataType = b.EntityId.ToString() });
+                    }
+                    else
+                    {
+                        ZeppSetup();
+                    }
+                };
+
+                SetupAction.Name = new StringBuilder("Run Setup");
+                SetupAction.Writer = (b, sb) => sb.Append("Run Setup");
+                MyAPIGateway.TerminalControls.AddAction<Sandbox.ModAPI.Ingame.IMyCockpit>(SetupAction);
 
                 #endregion
 
@@ -502,11 +525,27 @@ namespace ZepController
 
         public void ServerUpdate(ZeppelinData data)
         {
-            Data = data;
+            Data.TargetAltitude = data.TargetAltitude;
+            Data.IsActive = data.IsActive;
 
             ZeppelinOnOffControl.UpdateVisual();
             ZeppelinAltitudeControl.UpdateVisual();
             ZeppelinSetupControl.UpdateVisual();
+
+
+            ZeppelinData dataForOtherZeppelinControllers = new ZeppelinData()
+            {
+                TargetAltitude = data.TargetAltitude,
+                IsActive = false
+            };
+
+            foreach (IMyCockpit cockpit in otherCockpits)
+            {
+                if (cockpit.GameLogic is ZeppelinController)
+                {
+                    (cockpit.GameLogic as ZeppelinController).ServerUpdate(dataForOtherZeppelinControllers);
+                }
+            }
 
     }
 
@@ -1015,7 +1054,7 @@ namespace ZepController
             WriteNewConfig();
         }
 
-        public void ActiveHotbarText(IMyTerminalBlock cockpit, System.Text.StringBuilder hotbarText)
+        public void ActiveHotbarText(IMyTerminalBlock cockpit, StringBuilder hotbarText)
         {
             hotbarText.Clear();
             hotbarText.Append(Data.IsActive ? "Zepp On" : "Zepp Off");
