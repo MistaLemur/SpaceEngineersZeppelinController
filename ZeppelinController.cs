@@ -25,6 +25,16 @@ namespace ZepController
         public const float UP_100 = (100f / 1000f);
         public const float DOWN_100 = (-100f / 1000f);
 
+        public ZeppelinData Data { get; set; } = null;
+        public IMyCockpit ModBlock { get; private set; } = null;
+
+        // We should reduce this to something less
+        private bool IsRealGrid => (((MyCubeGrid)ModBlock.CubeGrid).Projector != null) &&
+                                    (ModBlock.Flags & EntityFlags.Transparent) != 0 &&
+                                    (ModBlock.SlimBlock.Dithering != 1 && ModBlock.SlimBlock.Dithering != 0) &&
+                                    (ModBlock.SlimBlock.BuildLevelRatio == 0);
+
+
         private IMyTerminalControlOnOffSwitch ZeppelinOnOffControl = null;
         private IMyTerminalControlSlider ZeppelinAltitudeControl = null;
         private IMyTerminalControlButton ZeppelinSetupControl = null;
@@ -37,10 +47,6 @@ namespace ZepController
         private IMyTerminalAction SetCurrentAction = null;
         private IMyTerminalAction ZeppelinOnOfAction = null;
         private IMyTerminalAction SetupAction = null;
-
-
-        public ZeppelinData Data { get; set; } = null;
-        public IMyCockpit ModBlock { get; private set; } = null;
 
         private bool ControlsInitialized = false;
 
@@ -109,22 +115,12 @@ namespace ZepController
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
             ModBlock = Entity as IMyCockpit;
-            ModBlock.AppendingCustomInfo += AppendCustomInfo;
             Data = new ZeppelinData() { BlockId = Entity.EntityId, TargetAltitude = 3.5f };
 
             Core.RegisterZeppelin(this);
 
             NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME | MyEntityUpdateEnum.EACH_FRAME; // this is how you add flags to run the functions below
             loadedConfig = "";
-        }
-
-        private void AppendCustomInfo(IMyTerminalBlock b, StringBuilder sb)
-        {
-            if (b.EntityId == ModBlock.EntityId)
-            {
-                sb.Append("\n=== Zep Controller ===\n");
-                sb.Append(lcdText.ToString());
-            }
         }
 
         public override void Close()
@@ -145,7 +141,7 @@ namespace ZepController
             loadedConfig = "";
 
             if (ModBlock == null) return;
-            if (!IsReal()) return;
+            if (!IsRealGrid) return;
 
             List<IMySlimBlock> blocksList = new List<IMySlimBlock>();
             ModBlock.CubeGrid.GetBlocks(blocksList, b => b.FatBlock is IMyTerminalBlock);
@@ -241,8 +237,8 @@ namespace ZepController
                     lcdText.Append("# balls " + balloons.Count + "\n");
                     lcdText.Append("# tanks " + ballasts.Count + "\n");
                     lcdText.Append("# vents " + exhaust.Count + "\n");
-                    lcdText.Append("serverupdate " + ShouldServerUpdate() + "\n");
-                    lcdText.Append("clientupdate " + ShouldClientUpdate() + "\n");
+                    //lcdText.Append("serverupdate " + ShouldServerUpdate() + "\n");
+                    //lcdText.Append("clientupdate " + ShouldClientUpdate() + "\n");
                     lcdText.Append("" + MyAPIGateway.Session?.LocalHumanPlayer?.Character?.ControllerInfo?.Controller?.ControlledEntity?.Entity?.GetType() + "\n");
 
                     UpdateLCD();
@@ -557,7 +553,7 @@ namespace ZepController
                 }
             }
 
-    }
+        }
 
         public override void UpdateOnceBeforeFrame()
         {
@@ -568,7 +564,7 @@ namespace ZepController
                 CreateControls();
             }
 
-            if (ShouldServerUpdate())
+            if (MyAPIGateway.Multiplayer.IsServer)
             {
                 // put your start actions here
                 if (!isSetup)
@@ -584,7 +580,7 @@ namespace ZepController
         {
 
             if (ModBlock == null) return;
-            if (!IsReal()) return;
+            if (!IsRealGrid) return;
 
             // turn off zeppelin controller if this is not the main
             if (MyAPIGateway.Multiplayer.IsServer && Data.IsActive && otherCockpits.Count > 0 && !ModBlock.IsMainCockpit)
@@ -608,34 +604,33 @@ namespace ZepController
         public override void UpdateBeforeSimulation10()
         {
             if (ModBlock == null) return;
-            if (!IsReal()) return;
+            if (!IsRealGrid) return;
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
 
-            if (ShouldServerUpdate())
-            { //Only run the full zeppelin update if I'm a server!
-              // put the stuff you expect to update each frame here
-              // msElapsed = 166;
-                sElapsed = 0.1667d;
+            //Only run the full zeppelin update if I'm a server!
+            // put the stuff you expect to update each frame here
+            // msElapsed = 166;
+            sElapsed = 0.1667d;
 
-                if (isSetup && Data.IsActive)
+            if (isSetup && Data.IsActive)
+            {
+                lcdText.Clear();
+
+                if (ModBlock.CustomData != loadedConfig)
                 {
-                    lcdText.Clear();
+                    ParseConfig(ModBlock.CustomData, "Altitude", "Pitch", "Roll");
+                    loadedConfig = ModBlock.CustomData;
+                }
 
-                    if (ModBlock.CustomData != loadedConfig)
-                    {
-                        ParseConfig(ModBlock.CustomData, "Altitude", "Pitch", "Roll");
-                        loadedConfig = ModBlock.CustomData;
-                    }
+                RunZeppelin();
 
-                    RunZeppelin();
+                lcdUpdateCounter -= sElapsed;
 
-                    lcdUpdateCounter -= sElapsed;
+                if (lcdUpdateCounter <= 0)
+                {
+                    lcdUpdateCounter = lcdUpdateDelay;
 
-                    if (lcdUpdateCounter <= 0)
-                    {
-                        lcdUpdateCounter = lcdUpdateDelay;
-
-                        UpdateLCD();
-                    }
+                    UpdateLCD();
                 }
             }
         }
@@ -705,12 +700,15 @@ namespace ZepController
 
             if (!justDocked)
             {
-                if (ShouldServerUpdate())
+                if (MyAPIGateway.Multiplayer.IsServer)
+                {
                     RunAltitudeControl();
+                }
 
-
-                if (ModBlock.CubeGrid.Physics != null && ShouldRunUpdates())
+                if (ModBlock.CubeGrid.Physics != null)
+                {
                     RunUprightControl();
+                }
             }
             else
             {
@@ -721,7 +719,6 @@ namespace ZepController
             {
                 lcdText.Append("Gas cells at safe levels. \n");
             }
-
 
             isDocked = justDocked;
         }
@@ -980,7 +977,7 @@ namespace ZepController
 
         private double GetAltitude()
         {
-            if (ModBlock == null || !IsReal()) return 0.0;
+            if (ModBlock == null || !IsRealGrid) return 0.0;
 
             ModBlock.TryGetPlanetElevation(Sandbox.ModAPI.Ingame.MyPlanetElevation.Sealevel, out currentAltitude);
             currentAltitude /= 1000;
@@ -989,7 +986,7 @@ namespace ZepController
 
         private double GetSurfaceAltitude()
         {
-            if (ModBlock == null || !IsReal()) return 0.0;
+            if (ModBlock == null || !IsRealGrid) return 0.0;
 
             double surfaceAltitude = 0;
             ModBlock.TryGetPlanetElevation(Sandbox.ModAPI.Ingame.MyPlanetElevation.Surface, out surfaceAltitude);
@@ -998,7 +995,7 @@ namespace ZepController
 
         private double GetHeading()
         {
-            if (ModBlock == null || !IsReal()) return 0.0;
+            if (ModBlock == null || !IsRealGrid) return 0.0;
 
             double heading = 0;
             double heading2 = 0;
@@ -1047,14 +1044,13 @@ namespace ZepController
 
         private void UpdateLCD()
         {
-            if (!ShouldServerUpdate()) return;
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
             if (lcd == null) return;
             if (!hasLCD) return;
 
             lcd.Enabled = true;
             lcd.ShowPublicTextOnScreen();
             lcd.WritePublicText(lcdText, false);
-            ModBlock.RefreshCustomInfo();
         }
 
         public void ToggleActive()
@@ -1073,7 +1069,7 @@ namespace ZepController
 
         private void WriteNewConfig()
         {
-            if (!ShouldServerUpdate()) return;
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
 
             ModBlock.CustomData = "";
             ModBlock.CustomData += WriteConfig();
@@ -1114,7 +1110,7 @@ namespace ZepController
 
         private void ParseConfig(string text, string altName, string pitchName, string rollName)
         {
-            if (!ShouldServerUpdate()) return;
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
 
             string[] lines = text.Split('\n');
 
@@ -1281,46 +1277,6 @@ namespace ZepController
         private Vector3D VectorRejection(Vector3D a, Vector3D b) //component of a perpendicular to b
         {
             return a - VectorProjection(a, b);
-        }
-
-        private bool ShouldRunUpdates()
-        {
-            return ShouldServerUpdate() || ShouldClientUpdate();
-        }
-
-        private bool ShouldServerUpdate()
-        {
-            //run updates if
-            // - I'm a dedicated server
-            // - I'm in singleplayer
-            // - I'm not a server BUT I am a pilot
-            // - I'm hosting a server through the client
-
-            return MyAPIGateway.Multiplayer.IsServer ||
-                MyAPIGateway.Multiplayer.MultiplayerActive == false || MyAPIGateway.Session.MultiplayerAlive == false;
-        }
-
-        private bool ShouldClientUpdate()
-        {
-            IMyEntity chara = (MyAPIGateway.Session.LocalHumanPlayer?.Character?.ControllerInfo?.Controller?.ControlledEntity?.Entity);
-            //for some reason, MyAPIGateway.Session.LocalHumanPlayer?.Character?.ControllerInfo?.Controller?.ControlledEntity?.Entity is set to the suit when I'm out of cockpit, and it's set to null when I'm in a cockpit
-
-            return (!MyAPIGateway.Multiplayer.IsServer && (chara == null || !(chara is IMyCharacter))) || ModBlock.Pilot == MyAPIGateway.Session?.LocalHumanPlayer?.Character;
-        }
-
-        private bool IsReal()
-        {
-            int flags = (int)(ModBlock.Flags & EntityFlags.Transparent);
-            if (flags != 0) return false;
-
-            if (ModBlock.SlimBlock.Dithering != 1 && ModBlock.SlimBlock.Dithering != 0) return false;
-
-            //if (ModBlock.Physics == null) return false;
-
-            if (ModBlock.SlimBlock.BuildLevelRatio == 0) return false;
-            if (((MyCubeGrid)ModBlock.CubeGrid).Projector != null) return false;
-
-            return true;
         }
 
         private void DebugPrint(string s)
