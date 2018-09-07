@@ -29,10 +29,10 @@ namespace ZepController
         public IMyCockpit ModBlock { get; private set; } = null;
 
         // We should reduce this to something less
-        private bool IsRealGrid => (((MyCubeGrid)ModBlock.CubeGrid).Projector != null) &&
-                                    (ModBlock.Flags & EntityFlags.Transparent) != 0 &&
-                                    (ModBlock.SlimBlock.Dithering != 1 && ModBlock.SlimBlock.Dithering != 0) &&
-                                    (ModBlock.SlimBlock.BuildLevelRatio == 0);
+        private bool IsRealGrid => (((MyCubeGrid)ModBlock.CubeGrid).Projector == null) &&
+                                    (ModBlock.Flags & EntityFlags.Transparent) == 0;// &&
+                                    //(ModBlock.SlimBlock.Dithering == 1 || ModBlock.SlimBlock.Dithering == 0) &&
+                                    //(ModBlock.SlimBlock.BuildLevelRatio != 0);
 
 
         private IMyTerminalControlOnOffSwitch ZeppelinOnOffControl = null;
@@ -60,7 +60,6 @@ namespace ZepController
         private bool useExhaust = true;
         private bool useGenerator = false;
 
-        private int msElapsed;
         private double sElapsed;
 
         private const string balloonName = "Cell";
@@ -91,7 +90,6 @@ namespace ZepController
         private PID RollController = new PID(0.5, 0.1, 0.25);
 
         private double currentAltitude = 0;
-        private double lastAltitude = 0;
         private double lastUpwardsVelocity = 0;
 
         //private const double balloonForce = 755194.1960563; // k = 200 * 1000 / 200;
@@ -100,16 +98,11 @@ namespace ZepController
                                                     //901650
 
         private const double ERROR_MARGIN = 0.0010;
-
         private double lcdUpdateCounter = 0.25;
         private double lcdUpdateDelay = 0.5;
-
         private StringBuilder lcdText = new StringBuilder();
-
         private string loadedConfig = "";
-
         private double feedBackThreshhold = 0.35;
-
         private bool printDebug = false;
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
@@ -118,30 +111,85 @@ namespace ZepController
             Data = new ZeppelinData() { BlockId = Entity.EntityId, TargetAltitude = 3.5f };
 
             Core.RegisterZeppelin(this);
-
             NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME | MyEntityUpdateEnum.EACH_FRAME; // this is how you add flags to run the functions below
-            loadedConfig = "";
         }
 
         public override void Close()
         {
             Core.UnregisterZeppelin(this);
+            NeedsUpdate = MyEntityUpdateEnum.NONE;
+        }
 
-            NeedsUpdate = VRage.ModAPI.MyEntityUpdateEnum.NONE;
+        public override void UpdateOnceBeforeFrame()
+        {
+            CreateControls();
+
+            if (MyAPIGateway.Multiplayer.IsServer && IsRealGrid && !isSetup)
+            {
+                ZeppSetup();
+                Core.SendDataChanged(Data);
+            }
+        }
+
+        public override void UpdateBeforeSimulation()
+        {
+            if (!IsRealGrid) return;
+
+            // turn off zeppelin controller if this is not the main
+            if (MyAPIGateway.Multiplayer.IsServer && Data.IsActive && otherCockpits.Count > 0 && !ModBlock.IsMainCockpit)
+            {
+                Data.IsActive = false;
+                Core.SendDataChanged(Data);
+            }
+
+            if (MyAPIGateway.Multiplayer.IsServer || (MyAPIGateway.Session != null && ModBlock.ControllerInfo != null && ModBlock.ControllerInfo.ControllingIdentityId == MyAPIGateway.Session.Player.IdentityId))
+            {
+                sElapsed = 0.01667d;
+                if (Data.IsActive && ModBlock.CubeGrid.Physics != null)
+                {
+                    RunUprightControl();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Only run the full zeppelin update if I'm a server!
+        /// put the stuff you expect to update each frame here
+        /// </summary>
+        public override void UpdateBeforeSimulation10()
+        {
+            if (!MyAPIGateway.Multiplayer.IsServer || !IsRealGrid) return;
+
+            sElapsed = 0.1667d;
+
+            if (isSetup && Data.IsActive)
+            {
+                lcdText.Clear();
+
+                if (ModBlock.CustomData != loadedConfig)
+                {
+                    ParseConfig(ModBlock.CustomData, "Altitude", "Pitch", "Roll");
+                    loadedConfig = ModBlock.CustomData;
+                }
+
+                RunZeppelin();
+
+                if (lcdUpdateCounter <= 0)
+                {
+                    UpdateLCD();
+                    lcdUpdateCounter = lcdUpdateDelay;
+                }
+
+                lcdUpdateCounter -= sElapsed;
+            }
         }
 
         public void ZeppSetup()
         {
-            ModBlock = Entity as IMyCockpit;
-
             isSetup = false;
             hasLCD = false;
             hasExhaust = false;
-
             loadedConfig = "";
-
-            if (ModBlock == null) return;
-            if (!IsRealGrid) return;
 
             List<IMySlimBlock> blocksList = new List<IMySlimBlock>();
             ModBlock.CubeGrid.GetBlocks(blocksList, b => b.FatBlock is IMyTerminalBlock);
@@ -227,18 +275,13 @@ namespace ZepController
                 ToggleGasStockpile(balloons, false);
                 ToggleGasStockpile(ballasts, false);
 
-
-                NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME | MyEntityUpdateEnum.EACH_FRAME; // this is how you add flags to run the functions below
                 if (printDebug)
                 {
                     lcdText.Clear();
                     lcdText.Append("RAN AN UPDATE SETUP\n");
-                    //lcdText += "" + NeedsUpdate + "\n";
                     lcdText.Append("# balls " + balloons.Count + "\n");
                     lcdText.Append("# tanks " + ballasts.Count + "\n");
                     lcdText.Append("# vents " + exhaust.Count + "\n");
-                    //lcdText.Append("serverupdate " + ShouldServerUpdate() + "\n");
-                    //lcdText.Append("clientupdate " + ShouldClientUpdate() + "\n");
                     lcdText.Append("" + MyAPIGateway.Session?.LocalHumanPlayer?.Character?.ControllerInfo?.Controller?.ControlledEntity?.Entity?.GetType() + "\n");
 
                     UpdateLCD();
@@ -248,400 +291,13 @@ namespace ZepController
             }
         }
 
-        private void CreateControls()
-        {
-            if (ControlsInitialized) return;
-            ControlsInitialized = true;
-
-            if (!MyAPIGateway.Utilities.IsDedicated)
-            {
-                #region OnOff Toggle
-
-                ZeppelinOnOffControl = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyCockpit>("Zeppelin Controller On/Off");
-                ZeppelinOnOffControl.Visible = (block) => { return block.EntityId == ModBlock.EntityId; };
-                ZeppelinOnOffControl.Enabled = (block) => { return block.EntityId == ModBlock.EntityId; };
-                ZeppelinOnOffControl.Getter = (block) => Data.IsActive;
-                ZeppelinOnOffControl.Setter = (block, value) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "toggle_active", DataType = block.EntityId.ToString() });
-                    }
-                    else
-                    {
-                        ToggleActive();
-                    }
-                };
-                ZeppelinOnOffControl.Title = MyStringId.GetOrCompute("Zeppelin Controller On/Off");
-                ZeppelinOnOffControl.OnText = MyStringId.GetOrCompute("On");
-                ZeppelinOnOffControl.OffText = MyStringId.GetOrCompute("Off");
-                MyAPIGateway.TerminalControls.AddControl<IMyCockpit>(ZeppelinOnOffControl);
-
-                #endregion
-
-                #region Altitude Slider
-
-                ZeppelinAltitudeControl = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyCockpit>("Zeppelin Altitude");
-                ZeppelinAltitudeControl.Visible = (block) => { return block.EntityId == ModBlock.EntityId; };
-                ZeppelinAltitudeControl.Enabled = (block) => { return block.EntityId == ModBlock.EntityId; };
-                ZeppelinAltitudeControl.Setter = (block, value) =>
-                {
-                    Data.TargetAltitude = value;
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendDataChanged(Data);
-                    }
-                };
-                ZeppelinAltitudeControl.Getter = (block) => Data.TargetAltitude;
-                ZeppelinAltitudeControl.Writer = (block, value) => value.Append($"{Data.TargetAltitude.ToString("n3")} km");
-                ZeppelinAltitudeControl.Title = MyStringId.GetOrCompute("Zeppelin Altitude");
-                ZeppelinAltitudeControl.Tooltip = MyStringId.GetOrCompute("km Distance above sea level");
-                ZeppelinAltitudeControl.SetLimits(0, 20);
-                MyAPIGateway.TerminalControls.AddControl<IMyCockpit>(ZeppelinAltitudeControl);
-
-                #endregion
-
-                #region Setup Button
-
-                ZeppelinSetupControl = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyCockpit>("Update Zeppelin Setup");
-                ZeppelinSetupControl.Visible = (block) => { return block.EntityId == ModBlock.EntityId; };
-                ZeppelinSetupControl.Enabled = (block) => { return block.EntityId == ModBlock.EntityId; };
-                ZeppelinSetupControl.Title = MyStringId.GetOrCompute("Update Zeppelin Setup");
-                ZeppelinSetupControl.Tooltip = MyStringId.GetOrCompute("Use to update controller blocks & config");
-                ZeppelinSetupControl.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "setup", DataType = b.EntityId.ToString() });
-                    }
-                    else
-                    {
-                        ZeppSetup();
-                    }
-                };
-                MyAPIGateway.TerminalControls.AddControl<IMyCockpit>(ZeppelinSetupControl);
-
-                #endregion
-
-                #region Action Climb 1m
-
-                Climb1Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Climb 1m");
-                Climb1Action.Name.Append($"Zeppelin Climb 1m");
-                Climb1Action.Icon = "Textures\\GUI\\Icons\\Actions\\Increase.dds";
-                Climb1Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
-                Climb1Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                Climb1Action.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = UP_1.ToString() });
-                    }
-                    else
-                    {
-                        ChangeTargetElevation(UP_1);
-                    }
-                };
-
-                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Climb1Action);
-
-                #endregion
-
-                #region Action Drop 1m
-
-                Drop1Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Drop 1m");
-                Drop1Action.Name.Append($"Zeppelin Drop 1m");
-                Drop1Action.Icon = "Textures\\GUI\\Icons\\Actions\\Decrease.dds";
-                Drop1Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
-                Drop1Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                Drop1Action.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = DOWN_1.ToString() });
-                    }
-                    else
-                    {
-                        ChangeTargetElevation(DOWN_1);
-                    }
-                };
-
-                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Drop1Action);
-
-                #endregion
-
-                #region Action Climb 10m
-
-                Climb10Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Climb 10m");
-                Climb10Action.Name.Append($"Zeppelin Climb 10m");
-                Climb10Action.Icon = "Textures\\GUI\\Icons\\Actions\\Increase.dds";
-                Climb10Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
-                Climb10Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                Climb10Action.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = UP_10.ToString() });
-                    }
-                    else
-                    {
-                        ChangeTargetElevation(UP_10);
-                    }
-                };
-
-                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Climb10Action);
-
-                #endregion
-
-                #region Action Drop 10m
-
-                Drop10Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Drop 10m");
-                Drop10Action.Name.Append($"Zeppelin Drop 10m");
-                Drop10Action.Icon = "Textures\\GUI\\Icons\\Actions\\Decrease.dds";
-                Drop10Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
-                Drop10Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                Drop10Action.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = DOWN_10.ToString() });
-                    }
-                    else
-                    {
-                        ChangeTargetElevation(DOWN_10);
-                    }
-                };
-
-                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Drop10Action);
-
-                #endregion
-
-                #region Action Climb 100m
-
-                Climb100Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Climb 100m");
-                Climb100Action.Name.Append($"Zeppelin Climb 100m");
-                Climb100Action.Icon = "Textures\\GUI\\Icons\\Actions\\Increase.dds";
-                Climb100Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
-                Climb100Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                Climb100Action.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = UP_100.ToString() });
-                    }
-                    else
-                    {
-                        ChangeTargetElevation(UP_100);
-                    }
-                };
-
-                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Climb100Action);
-
-                #endregion
-
-                #region Action Drop 100m
-
-                Drop100Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Drop 100m");
-                Drop100Action.Name.Append($"Zeppelin Drop 100m");
-                Drop100Action.Icon = "Textures\\GUI\\Icons\\Actions\\Decrease.dds";
-                Drop100Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
-                Drop100Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                Drop100Action.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = DOWN_100.ToString() });
-                    }
-                    else
-                    {
-                        ChangeTargetElevation(DOWN_100);
-                    }
-                };
-
-                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Drop100Action);
-
-                #endregion
-
-                #region Action Set Current Altitude
-
-                SetCurrentAction = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Set Current Altitude");
-                SetCurrentAction.Name.Append($"Set Current Altitude");
-                SetCurrentAction.Writer = (b, str) => str.Append($"Set Current Altitude");
-                SetCurrentAction.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                SetCurrentAction.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "restart", DataType = b.EntityId.ToString() });
-                    }
-                    else
-                    {
-                        ((ZeppelinController)b.GameLogic).ResetTargetElevation();
-                    }
-                };
-
-                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(SetCurrentAction);
-
-                #endregion
-
-                #region Action OnOff Controller
-
-                ZeppelinOnOfAction = MyAPIGateway.TerminalControls.CreateAction<Sandbox.ModAPI.Ingame.IMyCockpit>("ZeppelinControllerOn/Off");
-                ZeppelinOnOfAction.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                ZeppelinOnOfAction.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "toggle_active", DataType = b.EntityId.ToString() });
-                    }
-                    else
-                    {
-                        ((ZeppelinController)b.GameLogic).ToggleActive();
-                    }
-                };
-                ZeppelinOnOfAction.Name = new StringBuilder("Zeppelin Controller On/Off");
-                ZeppelinOnOfAction.Writer = ActiveHotbarText;
-                MyAPIGateway.TerminalControls.AddAction<Sandbox.ModAPI.Ingame.IMyCockpit>(ZeppelinOnOfAction);
-
-                #endregion
-
-                #region Action Setup Zeppelin Controller
-
-                SetupAction = MyAPIGateway.TerminalControls.CreateAction<Sandbox.ModAPI.Ingame.IMyCockpit>("SetupZeppelinController");
-                SetupAction.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
-                SetupAction.Action = (b) =>
-                {
-                    if (!MyAPIGateway.Multiplayer.IsServer)
-                    {
-                        Core.SendRequest(new Coms.Command() { Arguments = "setup", DataType = b.EntityId.ToString() });
-                    }
-                    else
-                    {
-                        ZeppSetup();
-                    }
-                };
-
-                SetupAction.Name = new StringBuilder("Run Setup");
-                SetupAction.Writer = (b, sb) => sb.Append("Run Setup");
-                MyAPIGateway.TerminalControls.AddAction<Sandbox.ModAPI.Ingame.IMyCockpit>(SetupAction);
-
-                #endregion
-
-            }
-        }
-
-        public void ServerUpdate(ZeppelinData data)
-        {
-            Data.TargetAltitude = data.TargetAltitude;
-            Data.IsActive = data.IsActive;
-
-            ZeppelinOnOffControl.UpdateVisual();
-            ZeppelinAltitudeControl.UpdateVisual();
-            ZeppelinSetupControl.UpdateVisual();
-
-
-            ZeppelinData dataForOtherZeppelinControllers = new ZeppelinData()
-            {
-                TargetAltitude = data.TargetAltitude,
-                IsActive = false
-            };
-
-            foreach (IMyCockpit cockpit in otherCockpits)
-            {
-                if (cockpit.GameLogic is ZeppelinController)
-                {
-                    (cockpit.GameLogic as ZeppelinController).ServerUpdate(dataForOtherZeppelinControllers);
-                }
-            }
-
-        }
-
-        public override void UpdateOnceBeforeFrame()
-        {
-            if (ModBlock == null) return;
-
-            if (!ControlsInitialized)
-            {
-                CreateControls();
-            }
-
-            if (MyAPIGateway.Multiplayer.IsServer)
-            {
-                // put your start actions here
-                if (!isSetup)
-                {
-                    ZeppSetup();
-                    Core.SendDataChanged(Data);
-                }
-            }
-
-        }
-
-        public override void UpdateBeforeSimulation()
-        {
-
-            if (ModBlock == null) return;
-            if (!IsRealGrid) return;
-
-            // turn off zeppelin controller if this is not the main
-            if (MyAPIGateway.Multiplayer.IsServer && Data.IsActive && otherCockpits.Count > 0 && !ModBlock.IsMainCockpit)
-            {
-                Data.IsActive = false;
-                Core.SendDataChanged(Data);
-            }
-
-            if (MyAPIGateway.Multiplayer.IsServer || (MyAPIGateway.Session != null && ModBlock.ControllerInfo != null && ModBlock.ControllerInfo.ControllingIdentityId == MyAPIGateway.Session.Player.IdentityId))
-            {
-                //msElapsed = 16;
-                sElapsed = 0.01667d;
-                if (isSetup && Data.IsActive)
-                {
-                    if (ModBlock.CubeGrid.Physics != null && !isDocked)
-                        RunUprightControl();
-                }
-            }
-        }
-
-        public override void UpdateBeforeSimulation10()
-        {
-            if (ModBlock == null) return;
-            if (!IsRealGrid) return;
-            if (!MyAPIGateway.Multiplayer.IsServer) return;
-
-            //Only run the full zeppelin update if I'm a server!
-            // put the stuff you expect to update each frame here
-            // msElapsed = 166;
-            sElapsed = 0.1667d;
-
-            if (isSetup && Data.IsActive)
-            {
-                lcdText.Clear();
-
-                if (ModBlock.CustomData != loadedConfig)
-                {
-                    ParseConfig(ModBlock.CustomData, "Altitude", "Pitch", "Roll");
-                    loadedConfig = ModBlock.CustomData;
-                }
-
-                RunZeppelin();
-
-                lcdUpdateCounter -= sElapsed;
-
-                if (lcdUpdateCounter <= 0)
-                {
-                    lcdUpdateCounter = lcdUpdateDelay;
-
-                    UpdateLCD();
-                }
-            }
-        }
-
         public void RunZeppelin()
         { //The guts of the controller are implemented here.
 
             //first check if the zeppelin is docked...
             bool justDocked = false;
-            double physicalMass = (double)ModBlock.CalculateShipMass().PhysicalMass;
-            double baseMass = (double)ModBlock.CalculateShipMass().BaseMass;
+            double physicalMass = ModBlock.CalculateShipMass().PhysicalMass;
+            double baseMass = ModBlock.CalculateShipMass().BaseMass;
 
             GetAltitude();
             double surfAltitude = GetSurfaceAltitude();
@@ -721,6 +377,61 @@ namespace ZepController
             }
 
             isDocked = justDocked;
+        }
+
+        public void UpdateZeppelinData(ZeppelinData data)
+        {
+            Data.TargetAltitude = data.TargetAltitude;
+            Data.IsActive = data.IsActive;
+
+            ZeppelinOnOffControl.UpdateVisual();
+            ZeppelinAltitudeControl.UpdateVisual();
+            ZeppelinSetupControl.UpdateVisual();
+
+            //ZeppelinOnOffControl.RedrawControl();
+            //ZeppelinAltitudeControl.RedrawControl();
+            //ZeppelinSetupControl.RedrawControl();
+
+            ZeppelinData dataForOtherZeppelinControllers = new ZeppelinData()
+            {
+                TargetAltitude = data.TargetAltitude,
+                IsActive = false
+            };
+
+            foreach (IMyCockpit cockpit in otherCockpits)
+            {
+                if (cockpit.GameLogic is ZeppelinController)
+                {
+                    (cockpit.GameLogic as ZeppelinController).UpdateZeppelinData(dataForOtherZeppelinControllers);
+                }
+            }
+
+        }
+
+        public void ChangeTargetElevation(float value)
+        {
+            Data.TargetAltitude += value;
+            Core.SendDataChanged(Data);
+        }
+
+        public void ResetTargetElevation()
+        {
+            Data.TargetAltitude = (float)GetAltitude();
+            Core.SendDataChanged(Data);
+        }
+
+        public void ToggleActive()
+        {
+            Data.IsActive = !Data.IsActive;
+            Core.SendDataChanged(Data);
+
+            WriteNewConfig();
+        }
+
+        public void ActiveHotbarText(IMyTerminalBlock cockpit, StringBuilder hotbarText)
+        {
+            hotbarText.Clear();
+            hotbarText.Append(Data.IsActive ? "Zepp On" : "Zepp Off");
         }
 
         private void RunAltitudeControl()
@@ -1017,18 +728,6 @@ namespace ZepController
             return heading;
         }
 
-        public void ChangeTargetElevation(float value)
-        {
-            Data.TargetAltitude += value;
-            Core.SendDataChanged(Data);
-        }
-
-        public void ResetTargetElevation()
-        {
-            Data.TargetAltitude = (float)GetAltitude();
-            Core.SendDataChanged(Data);
-        }
-
         private double GetNeededFilledRatio(double shipMass, double desiredAltitude)
         {
             double ratio = (shipMass * gravity) / (balloons.Count * balloonForce * GetAtmosphericDensity(desiredAltitude));
@@ -1051,20 +750,6 @@ namespace ZepController
             lcd.Enabled = true;
             lcd.ShowPublicTextOnScreen();
             lcd.WritePublicText(lcdText, false);
-        }
-
-        public void ToggleActive()
-        {
-            Data.IsActive = !Data.IsActive;
-            Core.SendDataChanged(Data);
-
-            WriteNewConfig();
-        }
-
-        public void ActiveHotbarText(IMyTerminalBlock cockpit, StringBuilder hotbarText)
-        {
-            hotbarText.Clear();
-            hotbarText.Append(Data.IsActive ? "Zepp On" : "Zepp Off");
         }
 
         private void WriteNewConfig()
@@ -1279,9 +964,285 @@ namespace ZepController
             return a - VectorProjection(a, b);
         }
 
-        private void DebugPrint(string s)
+        private void CreateControls()
         {
-            MyAPIGateway.Utilities.ShowNotification(s, 1);
+            if (ControlsInitialized) return;
+            ControlsInitialized = true;
+
+            if (!MyAPIGateway.Utilities.IsDedicated)
+            {
+                #region OnOff Toggle
+
+                ZeppelinOnOffControl = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyCockpit>("Zeppelin Controller On/Off");
+                ZeppelinOnOffControl.Visible = (block) => { return block.EntityId == ModBlock.EntityId; };
+                ZeppelinOnOffControl.Enabled = (block) => { return block.EntityId == ModBlock.EntityId; };
+                ZeppelinOnOffControl.Getter = (block) => Data.IsActive;
+                ZeppelinOnOffControl.Setter = (block, value) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "toggle_active", DataType = block.EntityId.ToString() });
+                    }
+                    else
+                    {
+                        ToggleActive();
+                    }
+                };
+                ZeppelinOnOffControl.Title = MyStringId.GetOrCompute("Zeppelin Controller On/Off");
+                ZeppelinOnOffControl.OnText = MyStringId.GetOrCompute("On");
+                ZeppelinOnOffControl.OffText = MyStringId.GetOrCompute("Off");
+                MyAPIGateway.TerminalControls.AddControl<IMyCockpit>(ZeppelinOnOffControl);
+
+                #endregion
+
+                #region Altitude Slider
+
+                ZeppelinAltitudeControl = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyCockpit>("Zeppelin Altitude");
+                ZeppelinAltitudeControl.Visible = (block) => { return block.EntityId == ModBlock.EntityId; };
+                ZeppelinAltitudeControl.Enabled = (block) => { return block.EntityId == ModBlock.EntityId; };
+                ZeppelinAltitudeControl.Setter = (block, value) =>
+                {
+                    Data.TargetAltitude = value;
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendDataChanged(Data);
+                    }
+                };
+                ZeppelinAltitudeControl.Getter = (block) => Data.TargetAltitude;
+                ZeppelinAltitudeControl.Writer = (block, value) => value.Append($"{Data.TargetAltitude.ToString("n3")} km");
+                ZeppelinAltitudeControl.Title = MyStringId.GetOrCompute("Zeppelin Altitude");
+                ZeppelinAltitudeControl.Tooltip = MyStringId.GetOrCompute("km Distance above sea level");
+                ZeppelinAltitudeControl.SetLimits(0, 20);
+                MyAPIGateway.TerminalControls.AddControl<IMyCockpit>(ZeppelinAltitudeControl);
+
+                #endregion
+
+                #region Setup Button
+
+                ZeppelinSetupControl = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyCockpit>("Update Zeppelin Setup");
+                ZeppelinSetupControl.Visible = (block) => { return block.EntityId == ModBlock.EntityId; };
+                ZeppelinSetupControl.Enabled = (block) => { return block.EntityId == ModBlock.EntityId; };
+                ZeppelinSetupControl.Title = MyStringId.GetOrCompute("Update Zeppelin Setup");
+                ZeppelinSetupControl.Tooltip = MyStringId.GetOrCompute("Use to update controller blocks & config");
+                ZeppelinSetupControl.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "setup", DataType = b.EntityId.ToString() });
+                    }
+                    else
+                    {
+                        ZeppSetup();
+                    }
+                };
+                MyAPIGateway.TerminalControls.AddControl<IMyCockpit>(ZeppelinSetupControl);
+
+                #endregion
+
+                #region Action Climb 1m
+
+                Climb1Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Climb 1m");
+                Climb1Action.Name.Append($"Zeppelin Climb 1m");
+                Climb1Action.Icon = "Textures\\GUI\\Icons\\Actions\\Increase.dds";
+                Climb1Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
+                Climb1Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                Climb1Action.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = UP_1.ToString() });
+                    }
+                    else
+                    {
+                        ChangeTargetElevation(UP_1);
+                    }
+                };
+
+                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Climb1Action);
+
+                #endregion
+
+                #region Action Drop 1m
+
+                Drop1Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Drop 1m");
+                Drop1Action.Name.Append($"Zeppelin Drop 1m");
+                Drop1Action.Icon = "Textures\\GUI\\Icons\\Actions\\Decrease.dds";
+                Drop1Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
+                Drop1Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                Drop1Action.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = DOWN_1.ToString() });
+                    }
+                    else
+                    {
+                        ChangeTargetElevation(DOWN_1);
+                    }
+                };
+
+                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Drop1Action);
+
+                #endregion
+
+                #region Action Climb 10m
+
+                Climb10Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Climb 10m");
+                Climb10Action.Name.Append($"Zeppelin Climb 10m");
+                Climb10Action.Icon = "Textures\\GUI\\Icons\\Actions\\Increase.dds";
+                Climb10Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
+                Climb10Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                Climb10Action.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = UP_10.ToString() });
+                    }
+                    else
+                    {
+                        ChangeTargetElevation(UP_10);
+                    }
+                };
+
+                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Climb10Action);
+
+                #endregion
+
+                #region Action Drop 10m
+
+                Drop10Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Drop 10m");
+                Drop10Action.Name.Append($"Zeppelin Drop 10m");
+                Drop10Action.Icon = "Textures\\GUI\\Icons\\Actions\\Decrease.dds";
+                Drop10Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
+                Drop10Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                Drop10Action.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = DOWN_10.ToString() });
+                    }
+                    else
+                    {
+                        ChangeTargetElevation(DOWN_10);
+                    }
+                };
+
+                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Drop10Action);
+
+                #endregion
+
+                #region Action Climb 100m
+
+                Climb100Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Climb 100m");
+                Climb100Action.Name.Append($"Zeppelin Climb 100m");
+                Climb100Action.Icon = "Textures\\GUI\\Icons\\Actions\\Increase.dds";
+                Climb100Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
+                Climb100Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                Climb100Action.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = UP_100.ToString() });
+                    }
+                    else
+                    {
+                        ChangeTargetElevation(UP_100);
+                    }
+                };
+
+                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Climb100Action);
+
+                #endregion
+
+                #region Action Drop 100m
+
+                Drop100Action = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Zeppelin Drop 100m");
+                Drop100Action.Name.Append($"Zeppelin Drop 100m");
+                Drop100Action.Icon = "Textures\\GUI\\Icons\\Actions\\Decrease.dds";
+                Drop100Action.Writer = (b, str) => str.Append($"{Data.TargetAltitude.ToString("n3")}km");
+                Drop100Action.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                Drop100Action.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "change", DataType = b.EntityId.ToString(), XMLData = DOWN_100.ToString() });
+                    }
+                    else
+                    {
+                        ChangeTargetElevation(DOWN_100);
+                    }
+                };
+
+                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(Drop100Action);
+
+                #endregion
+
+                #region Action Set Current Altitude
+
+                SetCurrentAction = MyAPIGateway.TerminalControls.CreateAction<IMyCockpit>($"Set Current Altitude");
+                SetCurrentAction.Name.Append($"Set Current Altitude");
+                SetCurrentAction.Writer = (b, str) => str.Append($"Set Current Altitude");
+                SetCurrentAction.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                SetCurrentAction.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "restart", DataType = b.EntityId.ToString() });
+                    }
+                    else
+                    {
+                        ((ZeppelinController)b.GameLogic).ResetTargetElevation();
+                    }
+                };
+
+                MyAPIGateway.TerminalControls.AddAction<IMyCockpit>(SetCurrentAction);
+
+                #endregion
+
+                #region Action OnOff Controller
+
+                ZeppelinOnOfAction = MyAPIGateway.TerminalControls.CreateAction<Sandbox.ModAPI.Ingame.IMyCockpit>("ZeppelinControllerOn/Off");
+                ZeppelinOnOfAction.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                ZeppelinOnOfAction.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "toggle_active", DataType = b.EntityId.ToString() });
+                    }
+                    else
+                    {
+                        ((ZeppelinController)b.GameLogic).ToggleActive();
+                    }
+                };
+                ZeppelinOnOfAction.Name = new StringBuilder("Zeppelin Controller On/Off");
+                ZeppelinOnOfAction.Writer = ActiveHotbarText;
+                MyAPIGateway.TerminalControls.AddAction<Sandbox.ModAPI.Ingame.IMyCockpit>(ZeppelinOnOfAction);
+
+                #endregion
+
+                #region Action Setup Zeppelin Controller
+
+                SetupAction = MyAPIGateway.TerminalControls.CreateAction<Sandbox.ModAPI.Ingame.IMyCockpit>("SetupZeppelinController");
+                SetupAction.Enabled = (b) => { return b.EntityId == ModBlock.EntityId; };
+                SetupAction.Action = (b) =>
+                {
+                    if (!MyAPIGateway.Multiplayer.IsServer)
+                    {
+                        Core.SendRequest(new Coms.Command() { Arguments = "setup", DataType = b.EntityId.ToString() });
+                    }
+                    else
+                    {
+                        ZeppSetup();
+                    }
+                };
+
+                SetupAction.Name = new StringBuilder("Run Setup");
+                SetupAction.Writer = (b, sb) => sb.Append("Run Setup");
+                MyAPIGateway.TerminalControls.AddAction<Sandbox.ModAPI.Ingame.IMyCockpit>(SetupAction);
+
+                #endregion
+
+            }
         }
     }
 }

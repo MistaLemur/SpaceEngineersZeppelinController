@@ -133,7 +133,7 @@ namespace ZepController
 
             if (data != null && Zeppelins.ContainsKey(data.BlockId))
             {
-                Zeppelins[data.BlockId].ServerUpdate(data);
+                Zeppelins[data.BlockId].UpdateZeppelinData(data);
             }
         }
     }
