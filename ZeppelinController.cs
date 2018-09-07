@@ -98,7 +98,7 @@ namespace ZepController
         private double lcdUpdateCounter = 0.25;
         private double lcdUpdateDelay = 0.5;
 
-        private string lcdText = "";
+        private StringBuilder lcdText = new StringBuilder();
 
         private string loadedConfig = "";
 
@@ -109,12 +109,22 @@ namespace ZepController
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
             ModBlock = Entity as IMyCockpit;
+            ModBlock.AppendingCustomInfo += AppendCustomInfo;
             Data = new ZeppelinData() { BlockId = Entity.EntityId, TargetAltitude = 3.5f };
 
             Core.RegisterZeppelin(this);
 
             NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME | MyEntityUpdateEnum.EACH_FRAME; // this is how you add flags to run the functions below
             loadedConfig = "";
+        }
+
+        private void AppendCustomInfo(IMyTerminalBlock b, StringBuilder sb)
+        {
+            if (b.EntityId == ModBlock.EntityId)
+            {
+                sb.Append("\n=== Zep Controller ===\n");
+                sb.Append(lcdText.ToString());
+            }
         }
 
         public override void Close()
@@ -225,15 +235,15 @@ namespace ZepController
                 NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME | MyEntityUpdateEnum.EACH_FRAME; // this is how you add flags to run the functions below
                 if (printDebug)
                 {
-
-                    lcdText = "RAN AN UPDATE SETUP\n";
+                    lcdText.Clear();
+                    lcdText.Append("RAN AN UPDATE SETUP\n");
                     //lcdText += "" + NeedsUpdate + "\n";
-                    lcdText += "# balls " + balloons.Count + "\n";
-                    lcdText += "# tanks " + ballasts.Count + "\n";
-                    lcdText += "# vents " + exhaust.Count + "\n";
-                    lcdText += "serverupdate " + ShouldServerUpdate() + "\n";
-                    lcdText += "clientupdate " + ShouldClientUpdate() + "\n";
-                    lcdText += "" + MyAPIGateway.Session?.LocalHumanPlayer?.Character?.ControllerInfo?.Controller?.ControlledEntity?.Entity?.GetType() + "\n";
+                    lcdText.Append("# balls " + balloons.Count + "\n");
+                    lcdText.Append("# tanks " + ballasts.Count + "\n");
+                    lcdText.Append("# vents " + exhaust.Count + "\n");
+                    lcdText.Append("serverupdate " + ShouldServerUpdate() + "\n");
+                    lcdText.Append("clientupdate " + ShouldClientUpdate() + "\n");
+                    lcdText.Append("" + MyAPIGateway.Session?.LocalHumanPlayer?.Character?.ControllerInfo?.Controller?.ControlledEntity?.Entity?.GetType() + "\n");
 
                     UpdateLCD();
                 }
@@ -608,7 +618,7 @@ namespace ZepController
 
                 if (isSetup && Data.IsActive)
                 {
-                    lcdText = "";
+                    lcdText.Clear();
 
                     if (ModBlock.CustomData != loadedConfig)
                     {
@@ -684,14 +694,14 @@ namespace ZepController
             double heading = GetHeading();
             int headIndex = (int)Math.Round(heading / 22.5d);
 
-            lcdText += "Heading: " + (headList[headIndex]) + " ( " + Math.Round(heading) + "° ) \n";
+            lcdText.Append("Heading: " + (headList[headIndex]) + " ( " + Math.Round(heading) + "° ) \n");
 
             //lcdText += "Target Altitude: " + Math.RoundData.TargetAltitude- 0.01,3) + "km \n";
-            lcdText += "Target Altitude: " + Math.Round(Data.TargetAltitude, 3) + "km \n";
-            lcdText += "Current Altitude: " + Math.Round(currentAltitude, 3) + "km \n";
-            lcdText += "Surface Altitude: " + Math.Round(surfAltitude) + "m \n";
-            lcdText += "Vert Speed: " + Math.Round(GetVerticalVelocity(), 2) + "m/s \n";
-            lcdText += "\n";
+            lcdText.Append("Target Altitude: " + Math.Round(Data.TargetAltitude, 3) + "km \n");
+            lcdText.Append("Current Altitude: " + Math.Round(currentAltitude, 3) + "km \n");
+            lcdText.Append("Surface Altitude: " + Math.Round(surfAltitude) + "m \n");
+            lcdText.Append("Vert Speed: " + Math.Round(GetVerticalVelocity(), 2) + "m/s \n");
+            lcdText.Append("\n");
 
             if (!justDocked)
             {
@@ -709,7 +719,7 @@ namespace ZepController
 
             if (dockFilled)
             {
-                lcdText += "Gas cells at safe levels. \n";
+                lcdText.Append("Gas cells at safe levels. \n");
             }
 
 
@@ -744,9 +754,9 @@ namespace ZepController
 
             double controllerOutput = feedForward + feedBack;
 
-            lcdText += "Target Fill: " + Math.Round(controllerOutput, 3) * 100 + "% \n";
-            lcdText += "Balloon Fill: " + Math.Round(filledRatio, 3) * 100 + "% \n";
-            lcdText += "Ballast Fill: " + Math.Round(tankRatio, 3) * 100 + "% \n";
+            lcdText.Append("Target Fill: " + Math.Round(controllerOutput, 3) * 100 + "% \n");
+            lcdText.Append("Balloon Fill: " + Math.Round(filledRatio, 3) * 100 + "% \n");
+            lcdText.Append("Ballast Fill: " + Math.Round(tankRatio, 3) * 100 + "% \n");
 
 
             double deviation = Math.Abs(controllerOutput - filledRatio); //filled ratio error
@@ -755,7 +765,7 @@ namespace ZepController
             if (filledRatio < controllerOutput && deviation > ERROR_MARGIN)
             {
                 //increase ratio
-                lcdText += "Filling Balloon... \n";
+                lcdText.Append("Filling Balloon... \n");
 
                 ToggleExhaust(exhaust, false);
                 ToggleGasStockpile(balloons, true);
@@ -764,7 +774,7 @@ namespace ZepController
             }
             else if (filledRatio > controllerOutput && deviation > ERROR_MARGIN)
             {
-                lcdText += "Emptying Balloon... \n";
+                lcdText.Append("Emptying Balloon... \n");
                 //decrease ratio
 
                 ToggleExhaust(exhaust, false);
@@ -785,7 +795,7 @@ namespace ZepController
             }
             else
             {
-                lcdText += "Maintaining Balloon... \n";
+                lcdText.Append("Maintaining Balloon... \n");
                 //maintain ratio
 
                 ToggleExhaust(exhaust, false);
@@ -806,7 +816,7 @@ namespace ZepController
             if (printDebug)
             {
                 double computedForce = EstimateBalloonForce(filledRatio, 10.0 / 60.0); //(physicalMass * gravity) / (filledRatio * balloons.Count * GetAtmosphericDensity(currentAltitude));
-                lcdText += "Computed Balloon Force: \n  " + computedForce + "\n";
+                lcdText.Append("Computed Balloon Force: \n  " + computedForce + "\n");
             }
 
         }
@@ -857,7 +867,7 @@ namespace ZepController
 
             //if the zeppelin is docked, reset altitude, shut off cells/tanks/vents/generators, and sleep.
 
-            lcdText += "Docked...\n";
+            lcdText.Append("Docked...\n");
 
             ResetTargetElevation();
 
@@ -874,14 +884,14 @@ namespace ZepController
 
             if (!dockFilled)
             {
-                lcdText += "Target Fill: " + Math.Round(feedForward, 3) * 100 + "% \n";
-                lcdText += "Balloon Fill: " + Math.Round(filledRatio, 3) * 100 + "% \n";
-                lcdText += "Ballast Fill: " + Math.Round(tankRatio, 3) * 100 + "% \n";
+                lcdText.Append("Target Fill: " + Math.Round(feedForward, 3) * 100 + "% \n");
+                lcdText.Append("Balloon Fill: " + Math.Round(filledRatio, 3) * 100 + "% \n");
+                lcdText.Append("Ballast Fill: " + Math.Round(tankRatio, 3) * 100 + "% \n");
 
                 if (filledRatio < feedForward && deviation > ERROR_MARGIN * 2)
                 {
                     //increase ratio
-                    lcdText += "Filling Balloon... \n";
+                    lcdText.Append("Filling Balloon... \n");
 
                     ToggleExhaust(exhaust, false);
                     ToggleGasStockpile(balloons, true);
@@ -890,7 +900,7 @@ namespace ZepController
                 }
                 else if (filledRatio > feedForward && deviation > ERROR_MARGIN * 2)
                 {
-                    lcdText += "Emptying Balloon... \n";
+                    lcdText.Append("Emptying Balloon... \n");
                     //decrease ratio
 
                     ToggleExhaust(exhaust, false);
@@ -911,7 +921,7 @@ namespace ZepController
                 }
                 else
                 {
-                    lcdText += "Maintaining Balloon... \n";
+                    lcdText.Append("Maintaining Balloon... \n");
                     //maintain ratio
 
                     ToggleExhaust(exhaust, false);
@@ -1044,6 +1054,7 @@ namespace ZepController
             lcd.Enabled = true;
             lcd.ShowPublicTextOnScreen();
             lcd.WritePublicText(lcdText, false);
+            ModBlock.RefreshCustomInfo();
         }
 
         public void ToggleActive()
