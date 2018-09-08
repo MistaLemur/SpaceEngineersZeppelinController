@@ -114,6 +114,14 @@ namespace ZepController
                     Zeppelins[blockId].ToggleActive();
                 }
             }
+            else if (cmd.Arguments == "sync")
+            {
+                long blockId = long.Parse(cmd.DataType);
+                if (Zeppelins.ContainsKey(blockId))
+                {
+                    coms.SendCommand(new Command() { XMLData = MyAPIGateway.Utilities.SerializeToXML(Zeppelins[blockId].Data) }, cmd.SteamId);
+                }
+            }
             else
             {
                 ZeppelinData data = MyAPIGateway.Utilities.SerializeFromXML<ZeppelinData>(cmd.XMLData);

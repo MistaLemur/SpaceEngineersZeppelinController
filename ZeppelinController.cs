@@ -49,6 +49,7 @@ namespace ZepController
         private IMyTerminalAction SetupAction = null;
 
         private bool ControlsInitialized = false;
+        private bool FirstTimeSyncToPlayer = true;
 
         private bool isSetup = false;
         private bool isDocked = false;
@@ -144,6 +145,12 @@ namespace ZepController
 
             if (MyAPIGateway.Multiplayer.IsServer || (MyAPIGateway.Session != null && ModBlock.ControllerInfo != null && ModBlock.ControllerInfo.ControllingIdentityId == MyAPIGateway.Session.Player.IdentityId))
             {
+                if (FirstTimeSyncToPlayer)
+                {
+                    Core.SendRequest(new Coms.Command() { Arguments = "sync", DataType = ModBlock.EntityId.ToString() });
+                    FirstTimeSyncToPlayer = false;
+                }
+
                 sElapsed = 0.01667d;
                 if (Data.IsActive && ModBlock.CubeGrid.Physics != null)
                 {
@@ -388,10 +395,6 @@ namespace ZepController
             ZeppelinAltitudeControl.UpdateVisual();
             ZeppelinSetupControl.UpdateVisual();
 
-            //ZeppelinOnOffControl.RedrawControl();
-            //ZeppelinAltitudeControl.RedrawControl();
-            //ZeppelinSetupControl.RedrawControl();
-
             ZeppelinData dataForOtherZeppelinControllers = new ZeppelinData()
             {
                 TargetAltitude = data.TargetAltitude,
@@ -400,9 +403,11 @@ namespace ZepController
 
             foreach (IMyCockpit cockpit in otherCockpits)
             {
-                if (cockpit.GameLogic is ZeppelinController)
+                ZeppelinController controller = cockpit.GameLogic as ZeppelinController;
+
+                if (controller != null)
                 {
-                    (cockpit.GameLogic as ZeppelinController).UpdateZeppelinData(dataForOtherZeppelinControllers);
+                    controller.UpdateZeppelinData(dataForOtherZeppelinControllers);
                 }
             }
 
