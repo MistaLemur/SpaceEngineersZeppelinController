@@ -76,6 +76,7 @@ namespace ZepController
 
         private List<IMyLandingGear> gears = new List<IMyLandingGear>();
         private List<IMyShipConnector> connectors = new List<IMyShipConnector>();
+        private List<IMyGyro> gyros = new List<IMyGyro>();
 
         private List<IMyCockpit> otherCockpits = new List<IMyCockpit>();
 
@@ -117,6 +118,9 @@ namespace ZepController
 
         public override void Close()
         {
+            TurnOffZeppelinControl();
+            ToggleGyroOnOff(false);
+
             Core.UnregisterZeppelin(this);
             NeedsUpdate = MyEntityUpdateEnum.NONE;
         }
@@ -167,6 +171,9 @@ namespace ZepController
         {
             if (!MyAPIGateway.Multiplayer.IsServer || !IsRealGrid) return;
 
+            if(isSetup)
+                ToggleGyroOnOff(Data.IsActive);
+
             sElapsed = 0.1667d;
 
             if (isSetup && Data.IsActive)
@@ -208,6 +215,7 @@ namespace ZepController
             gears.Clear();
             connectors.Clear();
             otherCockpits.Clear();
+            gyros.Clear();
 
             foreach (IMySlimBlock slim in blocksList)
             {
@@ -252,6 +260,10 @@ namespace ZepController
                 {
                     otherCockpits.Add(block as IMyCockpit);
                 }
+                else if(block is IMyGyro)
+                {
+                    gyros.Add(block as IMyGyro);
+                }
             }
 
             if (ModBlock.CustomData.Length == 0)
@@ -295,6 +307,7 @@ namespace ZepController
                 }
 
                 Core.RegisterZeppelin(this);
+                ToggleGyroOnOff(Data.IsActive);
             }
         }
 
@@ -428,6 +441,8 @@ namespace ZepController
         public void ToggleActive()
         {
             Data.IsActive = !Data.IsActive;
+            if (!Data.IsActive) TurnOffZeppelinControl();
+            ToggleGyroOnOff(Data.IsActive);
             Core.SendDataChanged(Data);
 
             WriteNewConfig();
@@ -438,6 +453,7 @@ namespace ZepController
             hotbarText.Clear();
             hotbarText.Append(Data.IsActive ? "Zepp On" : "Zepp Off");
         }
+
 
         private void RunAltitudeControl()
         {
@@ -603,6 +619,7 @@ namespace ZepController
 
                 if (filledRatio < feedForward && deviation > ERROR_MARGIN * 2)
                 {
+                    SetOnOff(balloons, true);
                     //increase ratio
                     lcdText.Append("Filling Balloon... \n");
 
@@ -613,6 +630,7 @@ namespace ZepController
                 }
                 else if (filledRatio > feedForward && deviation > ERROR_MARGIN * 2)
                 {
+                    SetOnOff(balloons, true);
                     lcdText.Append("Emptying Balloon... \n");
                     //decrease ratio
 
@@ -648,6 +666,33 @@ namespace ZepController
             }
         }
 
+        private void TurnOffZeppelinControl()
+        {
+            //this function is called when a zeppelin controller is disabled.
+            //This sets all ballasts and all balloons to neutral position
+            foreach(IMyGasTank balloon in balloons)
+            {
+                if (IsBlockDamaged(balloon)) continue;
+                balloon.Stockpile = false;
+                balloon.Enabled = true;
+            }
+
+            foreach (IMyGasTank ballast in ballasts)
+            {
+                if (IsBlockDamaged(ballast)) continue;
+                ballast.Stockpile = false;
+                ballast.Enabled = true;
+            }
+        }
+
+        private void ToggleGyroOnOff(bool onoff)
+        {
+            //This function turns all gyros on grid on or off.
+            foreach(IMyGyro gyro in gyros)
+            {
+                gyro.Enabled = onoff;
+            }
+        }
         private double EstimateBalloonForce(double balloonFill, double deltaTime)
         {
 
@@ -824,6 +869,10 @@ namespace ZepController
                 if (split[0].Contains("Activate Controller"))
                 {
                     Data.IsActive = Convert.ToBoolean(split[1]);
+                    ToggleGyroOnOff(Data.IsActive);
+
+                    if (!Data.IsActive) TurnOffZeppelinControl();
+
                     continue;
                 }
 
