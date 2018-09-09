@@ -29,11 +29,7 @@ namespace ZepController
         public IMyCockpit ModBlock { get; private set; } = null;
 
         // We should reduce this to something less
-        private bool IsRealGrid => (((MyCubeGrid)ModBlock.CubeGrid).Projector == null) &&
-                                    (ModBlock.Flags & EntityFlags.Transparent) == 0;// &&
-                                    //(ModBlock.SlimBlock.Dithering == 1 || ModBlock.SlimBlock.Dithering == 0) &&
-                                    //(ModBlock.SlimBlock.BuildLevelRatio != 0);
-
+        private bool IsRealGrid => (((MyCubeGrid)ModBlock.CubeGrid).Projector == null) && ModBlock.Physics != null;
 
         private IMyTerminalControlOnOffSwitch ZeppelinOnOffControl = null;
         private IMyTerminalControlSlider ZeppelinAltitudeControl = null;
@@ -171,8 +167,10 @@ namespace ZepController
         {
             if (!MyAPIGateway.Multiplayer.IsServer || !IsRealGrid) return;
 
-            if(isSetup)
+            if (isSetup)
+            {
                 ToggleGyroOnOff(Data.IsActive);
+            }
 
             sElapsed = 0.1667d;
 
@@ -693,6 +691,7 @@ namespace ZepController
                 gyro.Enabled = onoff;
             }
         }
+
         private double EstimateBalloonForce(double balloonFill, double deltaTime)
         {
 
@@ -1245,7 +1244,7 @@ namespace ZepController
                     }
                     else
                     {
-                        ((ZeppelinController)b.GameLogic).ResetTargetElevation();
+                        ResetTargetElevation();
                     }
                 };
 
@@ -1265,7 +1264,7 @@ namespace ZepController
                     }
                     else
                     {
-                        ((ZeppelinController)b.GameLogic).ToggleActive();
+                        ToggleActive();
                     }
                 };
                 ZeppelinOnOfAction.Name = new StringBuilder("Zeppelin Controller On/Off");
