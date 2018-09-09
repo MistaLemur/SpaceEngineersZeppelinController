@@ -201,6 +201,8 @@ namespace ZepController
             isSetup = false;
             hasLCD = false;
             hasExhaust = false;
+            dockFilled = false;
+            isDocked = false;
             loadedConfig = "";
 
             List<IMySlimBlock> blocksList = new List<IMySlimBlock>();
@@ -438,6 +440,9 @@ namespace ZepController
 
         public void ToggleActive()
         {
+            isDocked = false;
+            dockFilled = false;
+
             Data.IsActive = !Data.IsActive;
             if (!Data.IsActive) TurnOffZeppelinControl();
             ToggleGyroOnOff(Data.IsActive);
@@ -846,7 +851,11 @@ namespace ZepController
         {
             if (!MyAPIGateway.Multiplayer.IsServer) return;
 
+            dockFilled = false;
+            isDocked = false;
+
             string[] lines = text.Split('\n');
+
 
             foreach (string line in lines)
             {
