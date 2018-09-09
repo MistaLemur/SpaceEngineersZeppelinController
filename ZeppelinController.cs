@@ -1019,6 +1019,9 @@ namespace ZepController
 
         private bool IsReal()
         {
+            if (ModBlock == null) return false;
+            if (ModBlock.CubeGrid.Physics == null) return false;
+
             int flags = (int)(ModBlock.Flags & EntityFlags.Transparent);
             if (flags != 0) return false;
 
