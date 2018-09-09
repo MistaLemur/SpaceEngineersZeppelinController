@@ -29,7 +29,7 @@ namespace ZepController
         public IMyCockpit ModBlock { get; private set; } = null;
 
         // We should reduce this to something less
-        private bool IsRealGrid => (((MyCubeGrid)ModBlock.CubeGrid).Projector == null) && ModBlock.Physics != null;
+        private bool IsRealGrid => IsReal();
 
         private IMyTerminalControlOnOffSwitch ZeppelinOnOffControl = null;
         private IMyTerminalControlSlider ZeppelinAltitudeControl = null;
@@ -1015,6 +1015,19 @@ namespace ZepController
         private Vector3D VectorRejection(Vector3D a, Vector3D b) //component of a perpendicular to b
         {
             return a - VectorProjection(a, b);
+        }
+
+        private bool IsReal()
+        {
+            int flags = (int)(ModBlock.Flags & EntityFlags.Transparent);
+            if (flags != 0) return false;
+
+            if (ModBlock.SlimBlock.Dithering != 1 && ModBlock.SlimBlock.Dithering != 0) return false;
+
+            if (ModBlock.SlimBlock.BuildLevelRatio == 0) return false;
+            if (((MyCubeGrid)ModBlock.CubeGrid).Projector != null) return false;
+
+            return true;
         }
 
         private void CreateControls()
