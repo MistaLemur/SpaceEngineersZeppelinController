@@ -12,12 +12,18 @@ using VRage.ObjectBuilders;
 using VRage.Utils;
 using VRageMath;
 using System.Text;
+using ModNetworkAPI;
 
 namespace ZepController
 {
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_Cockpit), false, "CockpitOpen")]
     public class ZeppelinController : MyGameLogicComponent
     {
+
+        // Zeppelin controller data pool
+        public static Dictionary<long, ZeppelinDefinition> ZeppelinGridData = new Dictionary<long, ZeppelinDefinition>();
+        private NetworkAPI Network => NetworkAPI.Instance;
+
         public const float UP_1 = (1f / 1000f);
         public const float DOWN_1 = (-1f / 1000f);
         public const float UP_10 = (10f / 1000f);
@@ -25,7 +31,7 @@ namespace ZepController
         public const float UP_100 = (100f / 1000f);
         public const float DOWN_100 = (-100f / 1000f);
 
-        public ZeppelinData Data { get; set; } = null;
+        public ZeppelinDefinition Data { get; set; } = null;
         public IMyCockpit ModBlock { get; private set; } = null;
 
         // We should reduce this to something less
@@ -105,11 +111,24 @@ namespace ZepController
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
-            ModBlock = Entity as IMyCockpit;
-            Data = new ZeppelinData() { BlockId = Entity.EntityId, TargetAltitude = 3.5f };
+            if (!NetworkAPI.IsInitialized)
+            {
+                NetworkAPI.Init(Core.ModId, Core.ModName);
+            }
 
-            Core.RegisterZeppelin(this);
-            NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME | MyEntityUpdateEnum.EACH_FRAME; // this is how you add flags to run the functions below
+            ModBlock = Entity as IMyCockpit;
+
+            // Non physical grids should not be initialized
+            if (ModBlock.CubeGrid.Physics != null)
+            {
+                if (!ZeppelinGridData.ContainsKey(ModBlock.CubeGrid.EntityId))
+                {
+                    ZeppelinGridData.Add(ModBlock.CubeGrid.EntityId, new ZeppelinDefinition() { TargetAltitude = 3.5f, Grid = ModBlock.CubeGrid});
+                    Data = ZeppelinGridData[ModBlock.CubeGrid.EntityId];
+                }
+
+                NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME | MyEntityUpdateEnum.EACH_FRAME;
+            }
         }
 
         public override void Close()
@@ -117,7 +136,6 @@ namespace ZepController
             TurnOffZeppelinControl();
             ToggleGyroOnOff(false);
 
-            Core.UnregisterZeppelin(this);
             NeedsUpdate = MyEntityUpdateEnum.NONE;
         }
 
@@ -136,6 +154,7 @@ namespace ZepController
         {
             if (!IsRealGrid) return;
 
+            //TODO
             // turn off zeppelin controller if this is not the main
             if (MyAPIGateway.Multiplayer.IsServer && Data.IsActive && otherCockpits.Count > 0 && !ModBlock.IsMainCockpit)
             {
@@ -145,9 +164,10 @@ namespace ZepController
 
             if (MyAPIGateway.Multiplayer.IsServer || (MyAPIGateway.Session != null && ModBlock.ControllerInfo != null && ModBlock.ControllerInfo.ControllingIdentityId == MyAPIGateway.Session.Player.IdentityId))
             {
+                // If the player has never accessed this zeppelin seat request an update
                 if (FirstTimeSyncToPlayer)
                 {
-                    Core.SendRequest(new Coms.Command() { Arguments = "sync", DataType = ModBlock.EntityId.ToString() });
+                    Network.SendCommand("sync");
                     FirstTimeSyncToPlayer = false;
                 }
 
@@ -306,7 +326,6 @@ namespace ZepController
                     UpdateLCD();
                 }
 
-                Core.RegisterZeppelin(this);
                 ToggleGyroOnOff(Data.IsActive);
             }
         }
@@ -399,7 +418,7 @@ namespace ZepController
             isDocked = justDocked;
         }
 
-        public void UpdateZeppelinData(ZeppelinData data)
+        public void UpdateZeppelinData(ZeppelinDefinition data)
         {
             Data.TargetAltitude = data.TargetAltitude;
             Data.IsActive = data.IsActive;
@@ -408,7 +427,7 @@ namespace ZepController
             ZeppelinAltitudeControl.UpdateVisual();
             ZeppelinSetupControl.UpdateVisual();
 
-            ZeppelinData dataForOtherZeppelinControllers = new ZeppelinData()
+            ZeppelinDefinition dataForOtherZeppelinControllers = new ZeppelinDefinition()
             {
                 TargetAltitude = data.TargetAltitude,
                 IsActive = false
