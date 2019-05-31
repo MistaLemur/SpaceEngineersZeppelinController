@@ -9,45 +9,37 @@ namespace ZepController
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public class Core : MySessionComponentBase
     {
-        public const ushort ModId = 2662;
-        public const string ModName = "Zeppelin Controller";
+        private NetworkAPI Network = NetworkAPI.Instance;
 
-        private NetworkAPI Network => NetworkAPI.Instance;
-
-        //private static Dictionary<long, ZeppelinController> Zeppelins = new Dictionary<long, ZeppelinController>();
-
-
+        private static Dictionary<long, ZeppelinController> Zeppelins = new Dictionary<long, ZeppelinController>();
 
         public override void Init(MyObjectBuilder_SessionComponent sessionComponent)
         {
-            if (!NetworkAPI.IsInitialized)
-            {
-                NetworkAPI.Init(ModId, ModName);
-            }
+            NetworkAPI.Init(2662, "zep");
 
             if (Network.NetworkType == NetworkTypes.Client)
             {
-                Network.RegisterNetworkCommand("sync");
+                Network.RegisterChatCommand("sync", ClientCommand);
+                Network.RegisterNetworkCommand(null, ClientCallback);
             }
             else
             {
                 Network.RegisterNetworkCommand("setup", ServerCallback_Setup);
-                Network.RegisterNetworkCommand("restart", ServerCallback_Restart);
+                Network.RegisterNetworkCommand("reset", ServerCallback_Reset);
                 Network.RegisterNetworkCommand("change", ServerCallback_Change);
                 Network.RegisterNetworkCommand("toggle_active", ServerCallback_ToggleActive);
                 Network.RegisterNetworkCommand("sync", ServerCallback_Sync);
             }
         }
 
-        private void ServerCallback_Setup(ulong steamId, string commandString, byte[] data)
+        protected override void UnloadData()
         {
+            Network.Close();
+        }
 
-            ZeppelinDefinition info = MyAPIGateway.Utilities.SerializeFromBinary<ZeppelinDefinition>(data);
-
-            
-
-
-            long blockId = long.Parse(cmd.DataType);
+        private void ServerCallback_Setup(ulong steamid, string command, byte[] data)
+        {
+            long blockId = MyAPIGateway.Utilities.SerializeFromBinary<long>(data);
 
             if (Zeppelins.ContainsKey(blockId))
             {
@@ -55,122 +47,72 @@ namespace ZepController
             }
         }
 
-        private void ServerCallback_Restart(ulong steamId, string commandString, byte[] data)
+        private void ServerCallback_Reset(ulong steamid, string command, byte[] data)
         {
+            long blockId = MyAPIGateway.Utilities.SerializeFromBinary<long>(data);
 
-        }
-        private void ServerCallback_Change(ulong steamId, string commandString, byte[] data)
-        {
-
-        }
-        private void ServerCallback_ToggleActive(ulong steamId, string commandString, byte[] data)
-        {
-
-        }
-        private void ServerCallback_Sync(ulong steamId, string commandString, byte[] data)
-        {
-
-        }
-
-        protected override void UnloadData()
-        {
-            if (NetworkAPI.IsInitialized)
+            if (Zeppelins.ContainsKey(blockId))
             {
-                Network.Close();
+                Zeppelins[blockId].ResetTargetElevation();
             }
         }
 
-        //public static void RegisterZeppelin(ZeppelinController zep)
-        //{
-        //    if (!Zeppelins.ContainsKey(zep.Entity.EntityId))
-        //    {
-        //        Zeppelins.Add(zep.Entity.EntityId, zep);
-        //    }
-        //}
-
-        //public static void UnregisterZeppelin(ZeppelinController zep)
-        //{
-        //    Zeppelins.Remove(zep.Entity.EntityId);
-        //}
-
-        public static void SendDataChanged(ZeppelinDefinition data)
+        private void ServerCallback_Change(ulong steamid, string command, byte[] data)
         {
-            if (coms == null) return;
+            AltitudeAdjust altitude = MyAPIGateway.Utilities.SerializeFromBinary<AltitudeAdjust>(data);
 
-            coms.SendCommand(new Command()
+            if (altitude != null && Zeppelins.ContainsKey(altitude.BlockId))
             {
-                XMLData = MyAPIGateway.Utilities.SerializeToXML(data)
-            });
-        }
-
-        public static void SendRequest(Command cmd)
-        {
-            if (coms == null || MyAPIGateway.Multiplayer.IsServer) return;
-
-            coms.SendCommand(cmd);
-        }
-
-        private void HandleFromClient(Command cmd)
-        {
-            if (cmd.Arguments == "setup")
-            {
-
-            }
-            else if (cmd.Arguments == "restart")
-            {
-                long blockId = long.Parse(cmd.DataType);
-                if (Zeppelins.ContainsKey(blockId))
-                {
-                    Zeppelins[blockId].ResetTargetElevation();
-                }
-            }
-            else if (cmd.Arguments == "change")
-            {
-                long blockId = long.Parse(cmd.DataType);
-                float amount = float.Parse(cmd.XMLData);
-
-                if (Zeppelins.ContainsKey(blockId))
-                {
-                    Zeppelins[blockId].ChangeTargetElevation(amount);
-                }
-            }
-            else if (cmd.Arguments == "toggle_active")
-            {
-                long blockId = long.Parse(cmd.DataType);
-                if (Zeppelins.ContainsKey(blockId))
-                {
-                    Zeppelins[blockId].ToggleActive();
-                }
-            }
-            else if (cmd.Arguments == "sync")
-            {
-                long blockId = long.Parse(cmd.DataType);
-                if (Zeppelins.ContainsKey(blockId))
-                {
-                    coms.SendCommand(new Command() { XMLData = MyAPIGateway.Utilities.SerializeToXML(Zeppelins[blockId].Data) }, cmd.SteamId);
-                }
-            }
-            else
-            {
-                ZeppelinDefinition data = MyAPIGateway.Utilities.SerializeFromXML<ZeppelinDefinition>(cmd.XMLData);
-
-                if (data != null && Zeppelins.ContainsKey(data.BlockId))
-                {
-                    Zeppelins[data.BlockId].Data = data;
-
-                    coms.SendCommand(new Command() { XMLData = cmd.XMLData });
-                }
+                Zeppelins[altitude.BlockId].ChangeTargetElevation(altitude.AdjustmentAmount);
             }
         }
 
-        private void HandleFromServer(Command cmd)
+        private void ServerCallback_ToggleActive(ulong steamid, string command, byte[] data)
         {
-            ZeppelinDefinition data = MyAPIGateway.Utilities.SerializeFromXML<ZeppelinDefinition>(cmd.XMLData);
+            long blockId = MyAPIGateway.Utilities.SerializeFromBinary<long>(data);
 
-            if (data != null && Zeppelins.ContainsKey(data.BlockId))
+            if (Zeppelins.ContainsKey(blockId))
             {
-                Zeppelins[data.BlockId].UpdateZeppelinData(data);
+                Zeppelins[blockId].ToggleActive();
             }
+        }
+
+        private void ServerCallback_Sync(ulong steamid, string command, byte[] data)
+        {
+            long blockId = MyAPIGateway.Utilities.SerializeFromBinary<long>(data);
+
+            if (Zeppelins.ContainsKey(blockId))
+            {
+                Network.SendCommand(null, null, MyAPIGateway.Utilities.SerializeToBinary(Zeppelins[blockId].Data), steamid);
+            }
+        }
+
+        private void ClientCallback(ulong steamid, string command, byte[] data)
+        {
+            ZeppelinData zdata = MyAPIGateway.Utilities.SerializeFromBinary<ZeppelinData>(data);
+
+            if (zdata != null && Zeppelins.ContainsKey(zdata.BlockId))
+            {
+                Zeppelins[zdata.BlockId].UpdateZeppelinData(zdata);
+            }
+        }
+
+        private void ClientCommand(string args)
+        {
+            Network.SendCommand("sync");
+        }
+
+        public static void RegisterZeppelin(ZeppelinController zep)
+        {
+            if (!Zeppelins.ContainsKey(zep.Entity.EntityId))
+            {
+                Zeppelins.Add(zep.Entity.EntityId, zep);
+            }
+        }
+
+        public static void UnregisterZeppelin(ZeppelinController zep)
+        {
+            Zeppelins.Remove(zep.Entity.EntityId);
         }
     }
 }
