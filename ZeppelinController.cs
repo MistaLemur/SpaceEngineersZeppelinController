@@ -1074,7 +1074,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ToggleActive();
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ToggleActive();
                         }
                     };
 
@@ -1156,7 +1157,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ZeppSetup();
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ZeppSetup();
                         }
                     };
 
@@ -1192,7 +1194,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ChangeTargetElevation(UP_1);
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ChangeTargetElevation(UP_1);
                         }
                     };
 
@@ -1229,7 +1232,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ChangeTargetElevation(DOWN_1);
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ChangeTargetElevation(DOWN_1);
                         }
                     };
 
@@ -1265,7 +1269,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ChangeTargetElevation(UP_10);
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ChangeTargetElevation(UP_10);
                         }
                     };
 
@@ -1301,7 +1306,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ChangeTargetElevation(DOWN_10);
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ChangeTargetElevation(DOWN_10);
                         }
                     };
 
@@ -1337,7 +1343,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ChangeTargetElevation(UP_100);
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ChangeTargetElevation(UP_100);
                         }
                     };
 
@@ -1373,7 +1380,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ChangeTargetElevation(DOWN_100);
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ChangeTargetElevation(DOWN_100);
                         }
                     };
 
@@ -1399,7 +1407,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ResetTargetElevation();
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ResetTargetElevation();
                         }
                     };
 
@@ -1422,7 +1431,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ToggleActive();
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ToggleActive();
                         }
                     };
                     ZeppelinOnOffAction.Name = new StringBuilder("Zeppelin Controller On/Off");
@@ -1446,7 +1456,8 @@ namespace ZepController
                         }
                         else
                         {
-                            ZeppSetup();
+                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            zep.ZeppSetup();
                         }
                     };
 
