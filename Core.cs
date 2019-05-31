@@ -9,7 +9,7 @@ namespace ZepController
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public class Core : MySessionComponentBase
     {
-        private NetworkAPI Network = NetworkAPI.Instance;
+        private NetworkAPI Network => NetworkAPI.Instance;
 
         private static Dictionary<long, ZeppelinController> Zeppelins = new Dictionary<long, ZeppelinController>();
 
@@ -34,11 +34,7 @@ namespace ZepController
 
         protected override void UnloadData()
         {
-            if (NetworkAPI.IsInitialized)
-            {
-                Network.Close();
-            }
-
+            NetworkAPI.Dispose();
         }
 
         private void ServerCallback_Setup(ulong steamid, string command, byte[] data)

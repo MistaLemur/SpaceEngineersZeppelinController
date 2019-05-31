@@ -103,7 +103,7 @@ namespace ZepController
         private double feedBackThreshhold = 0.35;
         private bool printDebug = false;
 
-        private NetworkAPI Network = NetworkAPI.Instance;
+        private NetworkAPI Network => NetworkAPI.Instance;
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
