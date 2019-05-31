@@ -34,7 +34,11 @@ namespace ZepController
 
         protected override void UnloadData()
         {
-            Network.Close();
+            if (NetworkAPI.IsInitialized)
+            {
+                Network.Close();
+            }
+
         }
 
         private void ServerCallback_Setup(ulong steamid, string command, byte[] data)
