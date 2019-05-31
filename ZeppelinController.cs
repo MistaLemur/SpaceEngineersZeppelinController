@@ -1074,7 +1074,7 @@ namespace ZepController
                         }
                         else
                         {
-                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            ZeppelinController zep = block.GameLogic.GetAs<ZeppelinController>();
                             zep.ToggleActive();
                         }
                     };
@@ -1157,7 +1157,7 @@ namespace ZepController
                         }
                         else
                         {
-                            ZeppelinController zep = b.GameLogic.GetAs<ZeppelinController>();
+                            ZeppelinController zep = block.GameLogic.GetAs<ZeppelinController>();
                             zep.ZeppSetup();
                         }
                     };
